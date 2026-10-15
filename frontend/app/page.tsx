@@ -42,6 +42,7 @@ export default function AppPage() {
   const [errorText, setErrorText] = useState("");
   const [apiOnline, setApiOnline] = useState<boolean | null>(null);
   const [hasResult, setHasResult] = useState(false);
+  const [hasWorkSource, setHasWorkSource] = useState(false);
   const [imageVersion, setImageVersion] = useState(0);
   const [widthMm, setWidthMm] = useState(120);
   const [heightMm, setHeightMm] = useState(120);
@@ -85,13 +86,13 @@ export default function AppPage() {
   useEffect(() => { if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {}); }, []);
   useEffect(() => { void checkBackend(); const timer = window.setInterval(() => void checkBackend(), 15000); return () => window.clearInterval(timer); }, [checkBackend]);
 
-  const sourceUrl = project ? `${API}/api/v1/projects/${project.id}/preview?type=${hasResult && !cropping ? "work_source" : "source"}&v=${imageVersion}` : "";
+  const sourceUrl = project ? `${API}/api/v1/projects/${project.id}/preview?type=${hasResult && hasWorkSource && !cropping ? "work_source" : "source"}&v=${imageVersion}` : "";
   const resultUrl = project && hasResult ? `${API}/api/v1/projects/${project.id}/preview?type=transfer&v=${imageVersion}` : "";
   const saveProjects = (items: SavedProject[]) => { setProjects(items); localStorage.setItem("twb_projects", JSON.stringify(items)); };
 
   async function upload(file: File) {
     if (!file || !["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 25 * 1024 * 1024) { setErrorText(t("fileError")); return; }
-    setBusy(true); setErrorText(""); setHasResult(false); setProgress(0);
+    setBusy(true); setErrorText(""); setHasResult(false); setHasWorkSource(false); setProgress(0);
     try {
       const created = await request("/api/v1/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name.replace(/\.[^.]+$/, ""), locale, mode: "transfer" }) });
       const form = new FormData(); form.append("file", file);
@@ -114,7 +115,7 @@ export default function AppPage() {
         if (run !== jobRun.current) return;
         const job = await request(`/api/v1/jobs/${started.job_id}`);
         setProgress(job.progress || 0);
-        if (job.status === "completed") { setHasResult(true); setImageVersion(v => v + 1); if (job.metrics?.width_px && job.metrics?.height_px) setHeightMm(Math.round(widthMm * job.metrics.height_px / job.metrics.width_px * 10) / 10); setCropping(false); setView("compare"); setBusy(false); return; }
+        if (job.status === "completed") { setHasWorkSource(true); setHasResult(true); setImageVersion(v => v + 1); if (job.metrics?.width_px && job.metrics?.height_px) setHeightMm(Math.round(widthMm * job.metrics.height_px / job.metrics.width_px * 10) / 10); setCropping(false); setView("compare"); setBusy(false); return; }
         if (job.status === "failed" || job.status === "superseded") throw new Error(job.error?.message || t("failed"));
       }
       throw new Error(t("failed"));
@@ -148,8 +149,8 @@ export default function AppPage() {
   }
 
   async function openProject(item: SavedProject) {
-    setErrorText(""); setProject(item); setScreen("transfer"); setHasResult(false);
-    try { const state = await request(`/api/v1/projects/${item.id}`); if (state.status === "completed") { setHasResult(true); setImageVersion(v => v + 1); if (state.controls) setControls({...initialControls, ...state.controls}); if (state.metrics?.width_px && state.metrics?.height_px) setHeightMm(Math.round(widthMm * state.metrics.height_px / state.metrics.width_px * 10) / 10); } }
+    setErrorText(""); setProject(item); setScreen("transfer"); setHasResult(false); setHasWorkSource(false);
+    try { const state = await request(`/api/v1/projects/${item.id}`); if (state.status === "completed") { setHasWorkSource(Boolean(state.assets?.work_source)); setHasResult(true); setImageVersion(v => v + 1); if (state.controls) setControls({...initialControls, ...state.controls}); if (state.metrics?.width_px && state.metrics?.height_px) setHeightMm(Math.round(widthMm * state.metrics.height_px / state.metrics.width_px * 10) / 10); } }
     catch { saveProjects(projects.filter(p => p.id !== item.id)); setProject(null); setErrorText(t("failed")); }
   }
 

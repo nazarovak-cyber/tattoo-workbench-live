@@ -218,6 +218,7 @@ def run_job(job_id: str, project_id: str, body: TransferRequest):
             job.update(progress=90, stage="rendering")
             (folder / "result.png").write_bytes(png)
             (folder / "work_source.png").write_bytes(to_png(image))
+            meta["assets"]["work_source"] = "work_source.png"
             meta.update(status="completed", controls=body.model_dump(), metrics=metrics)
             meta["assets"]["result"] = "result.png"
             save(folder, meta)
