@@ -50,6 +50,19 @@ def test_mirror_and_line_weight_change_real_pixels():
     assert np.count_nonzero(c) > np.count_nonzero(a)
 
 
+def test_photo_ink_extraction_keeps_visible_geometry_without_skin_fill():
+    image = Image.new("RGB", (640, 640), (202, 155, 130))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((150, 160, 490, 500), outline=(52, 48, 51), width=13)
+    draw.line((170, 330, 470, 330), fill=(45, 43, 46), width=9)
+    result, metrics = process(image, Controls(source_type="photo"))
+    alpha = np.asarray(Image.open(BytesIO(result)))[:, :, 3]
+    assert alpha[160:190, 280:350].max() == 255
+    assert alpha[325:335, 280:350].max() == 255
+    assert alpha[25:100, 25:100].max() == 0
+    assert metrics["threshold_mode"] == "local_ink"
+
+
 def test_api_upload_transfer_export_and_delete(tmp_path, monkeypatch):
     import app.main as main
     monkeypatch.setattr(main, "DATA", tmp_path)
@@ -72,6 +85,22 @@ def test_api_upload_transfer_export_and_delete(tmp_path, monkeypatch):
     assert pdf["final_width_mm"] == 120 and pdf["scale_percent"] == 100
     assert client.get(pdf["download_url"]).content.startswith(b"%PDF")
     assert client.delete(f"/api/v1/projects/{pid}").json() == {"deleted": True}
+
+
+def test_photo_crop_is_validated_and_compared_at_same_size(tmp_path, monkeypatch):
+    import app.main as main
+    monkeypatch.setattr(main, "DATA", tmp_path)
+    client = TestClient(app)
+    pid = client.post("/api/v1/projects", json={}).json()["project_id"]
+    assert client.post(f"/api/v1/projects/{pid}/source", files={"file": ("photo.png", png(specimen()), "image/png")}).status_code == 200
+    bad = client.post(f"/api/v1/projects/{pid}/transfer", json={"source_type": "photo", "crop": [0.8, 0.1, 0.2, 0.9]})
+    assert bad.status_code == 422
+    started = client.post(f"/api/v1/projects/{pid}/transfer", json={"source_type": "photo", "crop": [0.1, 0.1, 0.9, 0.9]})
+    assert started.status_code == 200
+    assert client.get(f"/api/v1/jobs/{started.json()['job_id']}").json()["status"] == "completed"
+    source = Image.open(BytesIO(client.get(f"/api/v1/projects/{pid}/preview?type=work_source").content))
+    result = Image.open(BytesIO(client.get(f"/api/v1/projects/{pid}/preview?type=transfer").content))
+    assert source.size == result.size == (512, 512)
 
 
 def test_invalid_image_is_rejected(tmp_path, monkeypatch):

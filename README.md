@@ -7,6 +7,8 @@
 - JPG, PNG and WebP upload; EXIF orientation, type, size and dimension checks.
 - FastAPI Exact Engine: light paper normalization, denoise, Otsu/adaptive threshold, conservative connected-component cleanup, optional centerline stroke rebuild and mirror.
 - Exact, Outline and Detailed presets through detail and cleanup controls. Controls reprocess the uploaded source.
+- Photo-of-tattoo workflow: warm skin tone suggests Photo mode on upload, the artist can crop the visible tattoo, and local contrast extracts visible ink without generative repainting. The before/after view uses the same cropped region.
+- Body placement preview: male/female faceless vector templates, front/back views and selectable shoulder, arm, wrist, chest, ribs, abdomen, back, thigh, knee and calf zones. Move, rotate, scale and fade the stencil overlay. This preview never changes the exported stencil.
 - Before/after split, original, result and overlay views.
 - Transparent or white PNG; exact-size A4 PDF with optional tiling, overlap and registration marks. Print at 100%, never Fit to page.
 - Anonymous temporary projects, automatic cleanup on access/startup after 24 hours, explicit delete.
@@ -47,6 +49,8 @@ cd frontend && npm run build
 
 The test suite checks deterministic extraction, distinct shape retention, mirror and line weight changes, the upload/transfer/export API and invalid-image rejection. `benchmark/` describes the artist-approved regression corpus still needed for production quality claims.
 
+For a tattoo photograph, upload the photo, confirm **Photo of tattoo** is selected, draw a crop around the desired tattoo, generate the transfer, and inspect the extracted black ink against the cropped photo. The print panel has a separate mirror switch for stencil printing and a millimetre-scaled A4 preview.
+
 ## API
 
 Base `/api/v1`: `POST /projects`, `POST /projects/{id}/source`, `POST /projects/{id}/transfer`, `GET /jobs/{id}`, `GET /projects/{id}/preview`, `POST /projects/{id}/adjust`, `POST /projects/{id}/export/png`, `POST /projects/{id}/export/pdf`, `GET /exports/{project_id}/{export_id}/download`, `DELETE /projects/{id}`, `GET /health`. Browse `/docs` for live schemas. All API errors return `{ "error": { "code", "message", "details" } }`.
@@ -57,4 +61,4 @@ Deploy `frontend/` to a Next.js host and `backend/` as the provided Docker image
 
 ## Current limits
 
-Source raster is processed at up to 2400 px on its long side. SVG/VTracer output and manual erase/restore are deferred until geometry validation is implemented. Wrap, Cover-Up and Create are labeled Coming Soon. Processing jobs are in memory; queued state is not durable through a backend restart. Files expire after 24 hours and are removed on the next request or backend startup; a scheduled cleanup worker is needed for strictly timed deletion on an idle service. This beta is intended for a single service instance; production scale needs shared job and file storage. Always compare fine detail with the source before stencil printing.
+Source raster is processed at up to 2400 px on its long side. A single photograph cannot reveal lines hidden by body curvature, glare, blur or existing tattoos; Photo mode is a best-effort extraction of *visible* ink, and the artist must review it before printing. The body preview is a flat placement guide, not a simulated fit on a real client. SVG/VTracer output and manual erase/restore are deferred until geometry validation is implemented. Wrap, Cover-Up and Create are labeled Coming Soon. Processing jobs are in memory; queued state is not durable through a backend restart. Files expire after 24 hours and are removed on the next request or backend startup; a scheduled cleanup worker is needed for strictly timed deletion on an idle service. This beta is intended for a single service instance; production scale needs shared job and file storage. Always compare fine detail with the source before stencil printing.

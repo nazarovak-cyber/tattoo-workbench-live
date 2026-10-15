@@ -28,6 +28,7 @@ class Controls:
     cleanup: int = 40
     mirror: bool = False
     background_remove: bool = True
+    source_type: str = "artwork"
 
 
 def load_image(raw: bytes) -> tuple[Image.Image, str]:
@@ -73,24 +74,36 @@ def process(image: Image.Image, controls: Controls) -> tuple[bytes, dict]:
     # Only correct paper illumination when the border indicates a light background.
     border = np.concatenate((lightness[0], lightness[-1], lightness[:, 0], lightness[:, -1]))
     light_paper = float(np.median(border)) > 145
-    gray = lightness if light_paper else cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    if controls.background_remove and light_paper:
-        bg = cv2.GaussianBlur(gray, (0, 0), sigmaX=25)
-        gray = cv2.divide(gray, np.maximum(bg, 1), scale=255)
-    gray = cv2.bilateralFilter(gray, 5, 30, 30)
-    border_std = float(np.std(np.concatenate((gray[0], gray[-1], gray[:, 0], gray[:, -1]))))
-    if border_std < 12:
-        otsu_level, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
-        level = int(np.clip(otsu_level + (controls.detail_level - 3) * 6, 0, 255))
-        _, mask = cv2.threshold(gray, level, 255, cv2.THRESH_BINARY_INV)
-        threshold_mode = "otsu"
+    if controls.source_type == "photo":
+        # Estimate the local skin tone. Subtracting it suppresses uneven lighting
+        # without hallucinating contours that are absent from the photograph.
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+        gray = cv2.bilateralFilter(gray, 5, 30, 30)
+        sigma = max(12, min(gray.shape) / 24)
+        skin = cv2.GaussianBlur(gray, (0, 0), sigmaX=sigma)
+        darkness = cv2.subtract(skin, gray)
+        threshold = int(np.clip(15 - (controls.detail_level - 3) * 3 + controls.cleanup / 25, 7, 26))
+        mask = np.where(darkness >= threshold, 255, 0).astype(np.uint8)
+        threshold_mode = "local_ink"
     else:
-        c = int(np.clip(9 + (controls.detail_level - 3) * -2, 5, 15))
-        mask = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                     cv2.THRESH_BINARY_INV, 31, c)
-        threshold_mode = "adaptive"
+        gray = lightness if light_paper else cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+        if controls.background_remove and light_paper:
+            bg = cv2.GaussianBlur(gray, (0, 0), sigmaX=25)
+            gray = cv2.divide(gray, np.maximum(bg, 1), scale=255)
+        gray = cv2.bilateralFilter(gray, 5, 30, 30)
+        border_std = float(np.std(np.concatenate((gray[0], gray[-1], gray[:, 0], gray[:, -1]))))
+        if border_std < 12:
+            otsu_level, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
+            level = int(np.clip(otsu_level + (controls.detail_level - 3) * 6, 0, 255))
+            _, mask = cv2.threshold(gray, level, 255, cv2.THRESH_BINARY_INV)
+            threshold_mode = "otsu"
+        else:
+            c = int(np.clip(9 + (controls.detail_level - 3) * -2, 5, 15))
+            mask = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                         cv2.THRESH_BINARY_INV, 31, c)
+            threshold_mode = "adaptive"
     # Adaptive threshold can absorb a dark or textured background. Prefer a conservative fallback.
-    if np.count_nonzero(mask) / mask.size > 0.45:
+    if controls.source_type != "photo" and np.count_nonzero(mask) / mask.size > 0.45:
         _, fallback = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
         if np.count_nonzero(fallback) < np.count_nonzero(mask):
             mask, threshold_mode = fallback, "otsu_fallback"
@@ -122,6 +135,7 @@ def process(image: Image.Image, controls: Controls) -> tuple[bytes, dict]:
         "source_coverage": round(float(np.count_nonzero(cv2.bitwise_and(before_cleanup, clean)) / max(1, np.count_nonzero(before_cleanup))), 4),
         "width_px": result.width,
         "height_px": result.height,
-        "warning": "Review fine details against the source before printing." if controls.cleanup > 70 else None,
+        "source_type": controls.source_type,
+        "warning": "Photo extraction cannot recover hidden, curved or out-of-focus detail. Check every line against the tattoo before printing." if controls.source_type == "photo" else ("Review fine details against the source before printing." if controls.cleanup > 70 else None),
     }
     return to_png(result), metrics

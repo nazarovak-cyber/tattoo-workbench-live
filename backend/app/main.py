@@ -17,6 +17,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image
+import numpy as np
 from pydantic import BaseModel, Field, model_validator
 
 from .engine import Controls, ImageError, MAX_BYTES, load_image, process, to_png
@@ -101,11 +102,17 @@ class TransferRequest(BaseModel):
     mirror: bool = False
     background_remove: bool = True
     vectorize: bool = False
+    source_type: str = Field(default="artwork", pattern="^(artwork|photo)$")
+    crop: tuple[float, float, float, float] | None = None
 
     @model_validator(mode="after")
     def preserve_design(self):
         if not self.design_lock:
             raise ValueError("Exact Copy requires Design Lock.")
+        if self.crop is not None:
+            left, top, right, bottom = self.crop
+            if not (0 <= left < right <= 1 and 0 <= top < bottom <= 1 and right - left >= 0.05 and bottom - top >= 0.05):
+                raise ValueError("Crop must be a rectangle inside the image and at least 5% wide and high.")
         return self
 
 
@@ -169,6 +176,10 @@ async def upload_source(project_id: str, file: UploadFile = File(...)):
         return error(exc.code, str(exc), 400)
     if file.content_type not in (mime, "application/octet-stream"):
         return error("INVALID_IMAGE_FORMAT", "File MIME does not match image content.")
+    preview = np.asarray(image.resize((128, 128)), dtype=np.float32)
+    red, green, blue = preview[:, :, 0], preview[:, :, 1], preview[:, :, 2]
+    warm_skin = (red > green * 1.07) & (green > blue * 1.05) & (red > 75) & (red < 250)
+    suggested_source_type = "photo" if float(np.mean(warm_skin)) > 0.16 else "artwork"
     with job_state_lock:
         latest_jobs.pop(project_id, None)
         (folder / "source.tmp").write_bytes(to_png(image))
@@ -176,12 +187,14 @@ async def upload_source(project_id: str, file: UploadFile = File(...)):
         (folder / "original.bin").write_bytes(raw)
         for stale in folder.glob("result*.png"):
             stale.unlink()
+        (folder / "work_source.png").unlink(missing_ok=True)
         meta["assets"] = {"source": "source.png"}
         meta["status"] = "uploaded"
         meta.pop("metrics", None)
         save(folder, meta)
     return {"asset_id": f"ast_{project_id}_source", "project_id": project_id, "file_name": Path(file.filename or "artwork").name,
             "mime_type": mime, "width_px": image.width, "height_px": image.height, "size_bytes": len(raw),
+            "suggested_source_type": suggested_source_type,
             "preview_url": f"/api/v1/projects/{project_id}/preview?type=source"}
 
 
@@ -191,8 +204,12 @@ def run_job(job_id: str, project_id: str, body: TransferRequest):
     try:
         folder, meta = read_project(project_id)
         image = Image.open(folder / "source.png").convert("RGB")
+        if body.crop is not None:
+            left, top, right, bottom = body.crop
+            image = image.crop((round(left * image.width), round(top * image.height),
+                                round(right * image.width), round(bottom * image.height)))
         job.update(progress=55, stage="extracting_lines")
-        controls = Controls(body.detail_level, body.line_weight, body.cleanup, body.mirror, body.background_remove)
+        controls = Controls(body.detail_level, body.line_weight, body.cleanup, body.mirror, body.background_remove, body.source_type)
         png, metrics = process(image, controls)
         with job_state_lock:
             if latest_jobs.get(project_id) != job_id:
@@ -200,6 +217,7 @@ def run_job(job_id: str, project_id: str, body: TransferRequest):
                 return
             job.update(progress=90, stage="rendering")
             (folder / "result.png").write_bytes(png)
+            (folder / "work_source.png").write_bytes(to_png(image))
             meta.update(status="completed", controls=body.model_dump(), metrics=metrics)
             meta["assets"]["result"] = "result.png"
             save(folder, meta)
@@ -242,7 +260,9 @@ def preview(project_id: str, type: str = "transfer"):
         folder, _ = read_project(project_id)
     except FileNotFoundError:
         return error("PROJECT_NOT_FOUND", "Project not found or expired.", 404)
-    name = "source.png" if type == "source" else "result.png"
+    name = {"source": "source.png", "work_source": "work_source.png", "transfer": "result.png"}.get(type)
+    if name is None:
+        return error("INVALID_PARAMETER", "Unknown preview type.", 400)
     target = folder / name
     if not target.exists():
         return error("ASSET_NOT_FOUND", "Preview not available.", 404)
