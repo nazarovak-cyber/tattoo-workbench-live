@@ -183,7 +183,7 @@ export default function AppPage() {
     const region = regionsFor(bodyView).find(item => item.id === id);
     if (!region) return;
     setBodyRegion(id);
-    setPlacement(p => ({...p, x: region.x / 3.6, y: region.y / 7.2, width: Math.max(12, Math.min(35, region.w / 3.6))}));
+    setPlacement(p => ({...p, x: Math.round(region.x / 3.6), y: Math.round(region.y / 7.2), width: Math.round(Math.max(12, Math.min(35, region.w / 3.6)))}));
   }
   const route = (next: Screen) => { setScreen(next); setMobileControls(false); setErrorText(""); };
   const navItem = (item: { id: Screen; icon: typeof Home }, small = false) => {
