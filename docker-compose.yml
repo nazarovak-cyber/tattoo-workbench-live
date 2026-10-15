@@ -1,0 +1,16 @@
+services:
+  backend:
+    build: ./backend
+    ports: ["8000:8000"]
+    environment:
+      TWB_DATA_DIR: /data
+      TWB_CORS_ORIGINS: http://localhost:3000
+    volumes: ["tattoo-data:/data"]
+  frontend:
+    build: ./frontend
+    ports: ["3000:3000"]
+    environment:
+      TWB_BACKEND_URL: http://backend:8000
+    depends_on: [backend]
+volumes:
+  tattoo-data:

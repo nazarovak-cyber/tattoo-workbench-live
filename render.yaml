@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: tattoo-workbench-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+
+  - type: web
+    name: tattoo-workbench
+    runtime: node
+    plan: free
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start -- --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.0
+      - key: TWB_BACKEND_URL
+        fromService:
+          name: tattoo-workbench-api
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
