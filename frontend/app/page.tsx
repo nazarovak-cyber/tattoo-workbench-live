@@ -20,7 +20,7 @@ async function request(path: string, options?: RequestInit) {
   const response = await fetch(`${API}${path}`, options);
   if (!response.ok) {
     const data = await response.json().catch(() => null);
-    throw new Error(data?.error?.message || `HTTP ${response.status}`);
+    throw Object.assign(new Error(data?.error?.message || `HTTP ${response.status}`), { status: response.status });
   }
   return response.json();
 }
@@ -194,7 +194,15 @@ export default function AppPage() {
   async function openProject(item: SavedProject) {
     setErrorText(""); setProject(item); setScreen("transfer"); setHasResult(false); setHasWorkSource(false);
     try { await ensureBackend(); const state = await request(`/api/v1/projects/${item.id}`); if (state.status === "completed") { setHasWorkSource(Boolean(state.assets?.work_source)); setHasResult(true); setImageVersion(v => v + 1); if (state.controls) setControls({...initialControls, ...state.controls}); if (state.metrics?.width_px && state.metrics?.height_px) setHeightMm(Math.round(widthMm * state.metrics.height_px / state.metrics.width_px * 10) / 10); } }
-    catch (error) { setProject(null); setErrorText(error instanceof Error ? error.message : t("failed")); }
+    catch (error) {
+      setProject(null);
+      if (error instanceof Error && "status" in error && error.status === 404) {
+        saveProjects(projects.filter(p => p.id !== item.id));
+        setErrorText(t("projectExpired"));
+      } else {
+        setErrorText(error instanceof Error ? error.message : t("failed"));
+      }
+    }
   }
 
   async function deleteProject(item: SavedProject) {
