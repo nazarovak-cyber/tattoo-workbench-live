@@ -135,8 +135,8 @@ class PdfRequest(BaseModel):
     registration_marks: bool = True
 
 
-@app.get("/api/v1/health")
-@app.get("/health")
+@app.api_route("/api/v1/health", methods=["GET", "HEAD"])
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok", "version": "0.1.0", "engines": {"exact": "available", "outline": "available", "detailed": "available"}}
 

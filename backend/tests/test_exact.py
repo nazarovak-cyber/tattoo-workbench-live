@@ -9,6 +9,12 @@ from app.main import app
 from app.pdf_export import make_pdf
 
 
+def test_health_accepts_get_and_head():
+    with TestClient(app) as client:
+        assert client.get("/api/v1/health").json()["status"] == "ok"
+        assert client.head("/api/v1/health").status_code == 200
+
+
 def specimen() -> Image.Image:
     image = Image.new("RGB", (640, 640), "white")
     draw = ImageDraw.Draw(image)
